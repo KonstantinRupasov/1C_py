@@ -6,7 +6,6 @@ Name of the subcatalog = database name
 import MSSQL
 import logger as L
 import os
-import time
 
 def dbnames_gen(backup_path):
     """
@@ -15,14 +14,12 @@ def dbnames_gen(backup_path):
     Considers each subcatalog name to be dbname
     Doesn tell new dbs from existing ones
     """
-    for dbname in os.listdir(backup_path):
-        if os.path.isdir(os.path.join(backup_path, dbname)):
-            yield dbname
+    for _dbname in os.listdir(backup_path):
+        if os.path.isdir(os.path.join(backup_path, _dbname)):
+            yield _dbname
 
-LOG_DIR = 'C:\\SAAS\\LOGS'
-LOG_FILENAME = time.strftime('%Y%m%d_%H%M%S.log')
-LOGGER = L.LoggerClass(mode='2file', filename=os.path.join(LOG_DIR, LOG_FILENAME), filemode='w')
-MSSQL = MSSQL.MSSQLClass(server_name='NS3075285', username='sa', pwd='HB2r8iJt', database_name='master', logger=LOGGER)
+LOGGER = L.LoggerClass(mode='2file', path='C:\\SAAS\\LOGS\\Restoring')
+MSSQL = MSSQL.MSSQLClass(server_name='ETS', username='ETS', pwd='A3yhUv1Jk9fR', database_name='master', logger=LOGGER)
 BACKUP_PATH = 'C:\\Dropbox (1C-Poland)\\BACKUPS'
 count = 0
 print('Started restoring databases...')

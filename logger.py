@@ -1,23 +1,25 @@
 """
 Logging
 """
+import time
+
 class LoggerClass:
     """
     Logging events to file or printing them out
+    Always creates a new file
     """
-    def __init__(self, mode='2print', filename='', filemode='a'):
+    def __init__(self, mode='2print', path=''):
         """
         Object initialization
         mode:
             - '2print'
             - '2file'
-        filemode:
-            - 'w'	open for writing, truncating the file first
-            - 'a'	open for writing, appending to the end of the file if it exists'
         """
         self.mode = mode
         if self.mode == '2file':
-            self.logfile = open(filename, filemode)
+            self.path = path
+            self.filename = time.strftime('%Y%m%d_%H%M%S.log')
+            self.logfile = open(self.filename, 'w')
 
     def log(self, messages, exception=None):
         """

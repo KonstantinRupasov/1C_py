@@ -144,6 +144,25 @@ of database {dbname}...'.format(dbname=dbname, backup_filename=backup_filename))
             os.remove(file)
             self._logger.log(['File {file} deleted'.format(file=file)])
 
+    def get_restoring_dbs(self):
+        """
+        Yield all databases that are currently in "Restoring..." state
+        """
+        sql_str = 'select DB_NAME(database_id) from master.sys.databases where state = 1'
+        self._logger.log(['About to run this SQL statement:', sql_str])
+        self.cursor.execute(sql_str)
+        row = self.cursor.fetchone()
+        while row is not None:
+            yield row
+            row = self.cursor.fetchone()
+
+    def get_db_online(self, dbname):
+        """
+        Recover database from "Restoring..." state
+        """
+        sql_str = 'RESTORE DATABASE {} WITH RECOVERY'.format(dbname)
+        self._exec_sql(sql_str, 'Recovering database {} from "Restoring..." state'.format(dbname))
+
     def _exec_sql(self, sql_str, comment):
         """
         Run TSQL query
@@ -159,16 +178,8 @@ of database {dbname}...'.format(dbname=dbname, backup_filename=backup_filename))
 Testing
 ------------------------------------------------------------"""
 #LOGGER = L.LoggerClass(mode='2print')
-LOGGER = L.LoggerClass(mode='2file', filename='C:\\Rupasov\\log.txt', filemode='w')
 if __name__ == "__main__":
+    LOGGER = L.LoggerClass(mode='2file', path='C:\\SAAS\\LOG')
     MSSQL = MSSQLClass(server_name='ETS', username='ETS', pwd='A3yhUv1Jk9fR', database_name='master', logger=LOGGER)
-    #MSSQL.create_db_by_attaching_files(dbname='asd1', template_dbname='template')
-    #print(MSSQL)
-    #SSQL.backup_db_full('D:\\Rupasov\\1C-Polland\\BACKUP', 'asd1')
-    #MSSQL.restore_db('D:\\Rupasov\\1C-Polland\\BACKUP\\prissystem', 'prissystem')
-    #for dbname in MSSQL.dbnames_gen('D:\\Rupasov\\1C-Polland\\BACKUP'):
-    #    print(dbname)
-    BACKUP_PATH = 'C:\\Rupasov\\1C-Polland\\BACKUP'
-    for dbname in MSSQL.dbnames_gen(BACKUP_PATH):
-        db_backup_path = os.path.join(BACKUP_PATH, dbname)
-        MSSQL.restore_db(db_backup_path, dbname)
+    for dbname in MSSQL.get_restoring_dbs():
+        print(dbname[0])
