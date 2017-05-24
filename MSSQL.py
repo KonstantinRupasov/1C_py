@@ -1,9 +1,10 @@
 """
 Working with MS SQL Server
 """
+import os
+import shutil
 import pyodbc as odbc
 import logger as L
-import os
 
 class MSSQLClass:
     """
@@ -38,79 +39,71 @@ class MSSQLClass:
         self.cursor.execute("select cast(serverproperty('InstanceDefaultDataPath') as varchar(255))")
         self._data_path = self.cursor.fetchall()[0][0]
 
-    def create_db_by_attaching_files(self, dbname, templatename='', files=[]):
+    def dbnames_gen(self, backup_path):
         """
-        Creates a new database by attaching files
+        Generator yielding database names.
+        Reads all subcatalogs from backup_path
+        Considers each subcatalog name to be dbname
+        Doesn tell new dbs from existing ones
+        ------------------------------------
+        ToDo: Implement distributed message queue instead (http://www.celeryproject.org/)
+        Live server should send messages to reserve, notifying it about added and deleted databases
+        ------------------------------------
+        """
+        for dbname in os.listdir(backup_path):
+            if os.path.isdir(os.path.join(backup_path, dbname)):
+                yield dbname
+
+
+    def create_db_by_attaching_files(self, dbname, template_dbname):
+        """
+        Creates a new database by copying and attaching template db files
         Parameters:
             - dbname: The name of the new database to be created by attaching files
-            - templatename: The name of the template database
-                The database has to be detached before running this procedure
-                You don't need to specify the templatename if you use files array
-            - files: files to be copyed and attached as the new database's files
-                An array of strings
-                Every string specifies the fulle specified name of the database file
-                Optional parameter. If omitted the db is created by attaching these two files (default MS SQL settings):
-                    - <defaul MS SQL data path>\<dbname>.mdf
-                    - <defaul MS SQL data path>\<dbname>_Log.ldf
-                You should not specify this parameter if you use templatename
-        """
-        #If files[] parameter is omitted, fill it out with the default values
-        if files == []:
-            if templatename == '':
-                self._logger.log(['--- ERROR --- ',
-                                  'MSSQLClass.create_db_by_attaching_files',
-                                  'Nothing to append',
-                                  'You need to specify either templatename of files array'],
-                                 ValueError)
-                return
-            files.append('{data_path}{templatename}.mdf'.format(data_path=self._data_path, templatename=templatename))
-            files.append('{data_path}{templatename}_Log.ldf'.format(data_path=self._data_path, templatename=templatename))
-        sql_str = "CREATE DATABASE ""{}"" ON ".format(dbname)
-        first_file_name = True
-        for file_name in files:
-            if not first_file_name:
-                sql_str = sql_str + ', '
-            first_file_name = False
-            sql_str = sql_str + "(FILENAME = '{file_name}')".format(file_name=file_name)
-        sql_str = sql_str + ' FOR ATTACH'
-        self._logger.log(
-            ['-------------------------------------',
-             'About to execute this TSQL statement to attach the new IB database:',
-             sql_str])
-        self.cursor.execute(sql_str)
-        self._logger.log(['New IB {} has been attached sucessfully'.format(dbname)])
+            - template_dbname: The name of the template database
+                - The database has to be detached before running this procedure
+                - You don't need to specify the templatename if you use files array
+                - The template dadabase has to consist of two files:
+                    - {self._data_path}{template_dbname}.mdf
+                    - {self._data_path}{template_dbname}_Log.ldf
 
-    def backup_db_full(self, backup_filename, dbname):
         """
-        Create a full db backup in self.backup_path\\dbname catalog
+        #Copying template files into the ne db files
+        self._logger.log(['Copying {template_dbname} database files into \
+{dbname} database files'.format(template_dbname=template_dbname, dbname=dbname)])
+        shutil.copy('{data_path}{template_dbname}.mdf'.format(data_path=self._data_path, template_dbname=template_dbname),
+                    '{data_path}{dbname}.mdf'.format(data_path=self._data_path, dbname=dbname))
+        shutil.copy('{data_path}{template_dbname}_Log.ldf'.format(data_path=self._data_path, template_dbname=template_dbname),
+                    '{data_path}{dbname}_Log.ldf'.format(data_path=self._data_path, dbname=dbname))
+        sql_str = "CREATE DATABASE ""{}"" ON ".format(dbname)
+        self._logger.log(['Files are copied successfully'])
+        sql_str = "CREATE DATABASE \"{dbname}\" ON (FILENAME = '{data_path}{dbname}.mdf'), \
+(FILENAME = '{data_path}{dbname}_Log.ldf') FOR ATTACH".format(dbname=dbname, data_path=self._data_path)
+        self._exec_sql(sql_str, 'Attaching {dbname} IB...'.format(dbname=dbname))
+
+    def backup_db_full(self, backup_path, dbname):
         """
-        sql_str = "BACKUP DATABASE [{dbname}] TO  DISK = N'{backup_filename}' \
- WITH  RETAINDAYS = 1, NOFORMAT, NOINIT, NAME = N'first_full_backup', \
- SKIP, REWIND, NOUNLOAD, STATS = 10".format(dbname=dbname, backup_filename=backup_filename)
-        self._logger.log(['-------------------------------------',
-                          'About to create the full backup of the database:',
-                          sql_str])
+        Create a full backup of db dbname in {backup_path}\k\_{dbname}.bak file
+        """
         #Check is the backup catalog exists. Create is necessary
-        backup_path = backup_filename[0:backup_filename.rfind('\\')]
         if not os.path.isdir(backup_path):
             os.mkdir(backup_path)
+        backup_filename = os.path.join(backup_path, dbname, '_{dbname}.bak').format(dbname=dbname)
+        sql_str = "BACKUP DATABASE [{dbname}] TO  DISK = N'{backup_filename}' \
+ WITH  RETAINDAYS = 1, NOFORMAT, NOINIT, NAME = N'_{dbname}.bak', \
+ SKIP, REWIND, NOUNLOAD, STATS = 10".format(dbname=dbname, backup_filename=backup_filename)
         #Create the backup
-        self._logger.log(['Backing up database {}...'.format(dbname)])
-        self.cursor.execute(sql_str)
-        while self.cursor.nextset():
-            pass
-        self._logger.log(['Full backup of database {} has been created sucessfully'.format(dbname)])
+        self._exec_sql(sql_str, 'Creating a full backup {backup_filename} \
+of database {dbname}...'.format(dbname=dbname, backup_filename=backup_filename))
 
     def restore_db(self, backup_path, dbname, backup_ext={'full': 'bak', 'diff': 'dif', 'tlog': 'trn'}):
         """
-        Restore all backups from catalog backup_path\dbname to database dbname:
+        Restore a single database dbname from all backup files in the catalog backup_path\dbname:
             - Find latest full backup (*.backup_ext['full']) and restore it:
-                - If the database doesn't exist - create it (was added to the PROD server)
+                - If the database doesn't exist - create it
                 - Delete all full backups
-            - Find latest diff backup (*.backup_ext['diff']) and restore it
-            - Delete all diff backups
-            - Restore all transaction log backups (*.backup_ext['trn'])
-            - Delete all transaction log backups
+            - Find latest diff backup (*.backup_ext['diff']) and restore it. Delete all diff backups
+            - Restore all transaction log backups (*.backup_ext['trn']). Delete all transaction log backups
         """
         self._logger.log(['Restoring database {dbname} from backups in {backup_path} catalog'.format(dbname=dbname, backup_path=backup_path)])
         ext = tuple(item for item in backup_ext.values())
@@ -160,7 +153,7 @@ class MSSQLClass:
  MOVE N'{dbname}' TO N'{data_path}{dbname}.mdf',\
  MOVE N'{dbname}_log' TO N'{data_path}{dbname}_log.ldf',\
  NOUNLOAD, REPLACE, NORECOVERY, STATS = 5".format(dbname=dbname, file=file, data_path=self._data_path)
-            self._exec_sql(sql_str, 'Restoring {dbname} from {file}:'.format(dbname=dbname, file=file))
+            self._exec_sql(sql_str, 'Restoring {dbname} from {file}...'.format(dbname=dbname, file=file))
             #Add the file to files2delete
             files2delete.append(file)
         #Delete all backup files
@@ -188,7 +181,13 @@ Testing
 LOGGER = L.LoggerClass(mode='2file', filename='D:\\Rupasov\\log.txt', filemode='w')
 if __name__ == "__main__":
     MSSQL = MSSQLClass(server_name='ETS', username='ETS', pwd='A3yhUv1Jk9fR', database_name='master', logger=LOGGER)
-    #MSSQL.create_db_by_attaching_files(dbname='asd1', templatename='template')
+    #MSSQL.create_db_by_attaching_files(dbname='asd1', template_dbname='template')
     #print(MSSQL)
-    #MSSQL.backup_db_full('C:\\Program Files\\Microsoft SQL Server\\MSSQL12.MSSQLSERVER\\MSSQL\\Backup\\DR_IT\\DR_IT2.bak', 'DR_IT')
-    MSSQL.restore_db('D:\\Rupasov\\1C-Polland\\BACKUP\\prissystem', 'prissystem')
+    #SSQL.backup_db_full('D:\\Rupasov\\1C-Polland\\BACKUP', 'asd1')
+    #MSSQL.restore_db('D:\\Rupasov\\1C-Polland\\BACKUP\\prissystem', 'prissystem')
+    #for dbname in MSSQL.dbnames_gen('D:\\Rupasov\\1C-Polland\\BACKUP'):
+    #    print(dbname)
+    BACKUP_PATH = 'D:\\Rupasov\\1C-Polland\\BACKUP'
+    for dbname in MSSQL.dbnames_gen(BACKUP_PATH):
+        db_backup_path = os.path.join(BACKUP_PATH, dbname)
+        MSSQL.restore_db(db_backup_path, dbname)
