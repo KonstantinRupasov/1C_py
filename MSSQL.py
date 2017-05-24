@@ -39,22 +39,6 @@ class MSSQLClass:
         self.cursor.execute("select cast(serverproperty('InstanceDefaultDataPath') as varchar(255))")
         self._data_path = self.cursor.fetchall()[0][0]
 
-    def dbnames_gen(self, backup_path):
-        """
-        Generator yielding database names.
-        Reads all subcatalogs from backup_path
-        Considers each subcatalog name to be dbname
-        Doesn tell new dbs from existing ones
-        ------------------------------------
-        ToDo: Implement distributed message queue instead (http://www.celeryproject.org/)
-        Live server should send messages to reserve, notifying it about added and deleted databases
-        ------------------------------------
-        """
-        for dbname in os.listdir(backup_path):
-            if os.path.isdir(os.path.join(backup_path, dbname)):
-                yield dbname
-
-
     def create_db_by_attaching_files(self, dbname, template_dbname):
         """
         Creates a new database by copying and attaching template db files
@@ -148,10 +132,7 @@ of database {dbname}...'.format(dbname=dbname, backup_filename=backup_filename))
         #Restore all selected files
         for file in files2restore:
             #Resore the file
-            sql_str = "RESTORE DATABASE [{dbname}]\
- FROM DISK = N'{file}'  WITH FILE = 1,\
- MOVE N'{dbname}' TO N'{data_path}{dbname}.mdf',\
- MOVE N'{dbname}_log' TO N'{data_path}{dbname}_log.ldf',\
+            sql_str = "RESTORE DATABASE [{dbname}] FROM DISK = N'{file}'  WITH FILE = 1,\
  NOUNLOAD, REPLACE, NORECOVERY, STATS = 5".format(dbname=dbname, file=file, data_path=self._data_path)
             self._exec_sql(sql_str, 'Restoring {dbname} from {file}...'.format(dbname=dbname, file=file))
             #Add the file to files2delete
@@ -178,7 +159,7 @@ of database {dbname}...'.format(dbname=dbname, backup_filename=backup_filename))
 Testing
 ------------------------------------------------------------"""
 #LOGGER = L.LoggerClass(mode='2print')
-LOGGER = L.LoggerClass(mode='2file', filename='D:\\Rupasov\\log.txt', filemode='w')
+LOGGER = L.LoggerClass(mode='2file', filename='C:\\Rupasov\\log.txt', filemode='w')
 if __name__ == "__main__":
     MSSQL = MSSQLClass(server_name='ETS', username='ETS', pwd='A3yhUv1Jk9fR', database_name='master', logger=LOGGER)
     #MSSQL.create_db_by_attaching_files(dbname='asd1', template_dbname='template')
@@ -187,7 +168,7 @@ if __name__ == "__main__":
     #MSSQL.restore_db('D:\\Rupasov\\1C-Polland\\BACKUP\\prissystem', 'prissystem')
     #for dbname in MSSQL.dbnames_gen('D:\\Rupasov\\1C-Polland\\BACKUP'):
     #    print(dbname)
-    BACKUP_PATH = 'D:\\Rupasov\\1C-Polland\\BACKUP'
+    BACKUP_PATH = 'C:\\Rupasov\\1C-Polland\\BACKUP'
     for dbname in MSSQL.dbnames_gen(BACKUP_PATH):
         db_backup_path = os.path.join(BACKUP_PATH, dbname)
         MSSQL.restore_db(db_backup_path, dbname)
