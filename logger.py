@@ -2,6 +2,7 @@
 Logging
 """
 import time
+import os
 
 class LoggerClass:
     """
@@ -18,7 +19,8 @@ class LoggerClass:
         self.mode = mode
         if self.mode == '2file':
             self.path = path
-            self.filename = time.strftime('%Y%m%d_%H%M%S.log')
+            _filename = time.strftime('%Y%m%d_%H%M%S.log')
+            self.filename = os.path.join(self.path, _filename)
             self.logfile = open(self.filename, 'w')
 
     def log(self, messages, exception=None):

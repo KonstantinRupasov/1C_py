@@ -151,10 +151,8 @@ of database {dbname}...'.format(dbname=dbname, backup_filename=backup_filename))
         sql_str = 'select DB_NAME(database_id) from master.sys.databases where state = 1'
         self._logger.log(['About to run this SQL statement:', sql_str])
         self.cursor.execute(sql_str)
-        row = self.cursor.fetchone()
-        while row is not None:
-            yield row
-            row = self.cursor.fetchone()
+        _dbnames = self.cursor.fetchall()
+        return [_dbname[0] for _dbname in _dbnames]
 
     def get_db_online(self, dbname):
         """
@@ -179,7 +177,8 @@ Testing
 ------------------------------------------------------------"""
 #LOGGER = L.LoggerClass(mode='2print')
 if __name__ == "__main__":
-    LOGGER = L.LoggerClass(mode='2file', path='C:\\SAAS\\LOG')
+    LOGGER = L.LoggerClass(mode='2file', path='C:\\SAAS\\LOGS')
     MSSQL = MSSQLClass(server_name='ETS', username='ETS', pwd='A3yhUv1Jk9fR', database_name='master', logger=LOGGER)
-    for dbname in MSSQL.get_restoring_dbs():
-        print(dbname[0])
+    _dbnames = MSSQL.get_restoring_dbs()
+    for dbname in _dbnames:
+        print(str(dbname))

@@ -43,6 +43,10 @@ class OneCClass():
         match = re.search(r'cluster\s*: ', res)
         cluster_guid_pos = match.end()
         self._cluster_guid = res[cluster_guid_pos:cluster_guid_pos+36]
+        """
+        ToDo: Добавить считывание списка инфобаз
+        Использовать список для поиска перед созданием инфобазы (существует ли инфобаза)
+        """
 
     def create_infobase(self, ibname, dbms):
         """

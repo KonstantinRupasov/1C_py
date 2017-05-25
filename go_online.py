@@ -14,7 +14,8 @@ LOGGER = L.LoggerClass(mode='2file', path='C:\\SAAS\\LOGS\\GoOnline')
 MSSQL = MSSQL.MSSQLClass(server_name='ETS', username='ETS', pwd='A3yhUv1Jk9fR', database_name='master', logger=LOGGER)
 count = 0
 print('Started getting databases online...')
-for dbname in MSSQL.get_restoring_dbs():
+dbnames = MSSQL.get_restoring_dbs()
+for dbname in dbnames:
     count += 1
     print('{}. Getting database {} online...'.format(count, dbname))
     MSSQL.get_db_online(dbname)
