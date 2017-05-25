@@ -6,6 +6,7 @@ Name of the subcatalog = database name
 import MSSQL
 import logger as L
 import os
+import credentials as cr
 
 def dbnames_gen(backup_path):
     """
@@ -19,7 +20,11 @@ def dbnames_gen(backup_path):
             yield _dbname
 
 LOGGER = L.LoggerClass(mode='2file', path='C:\\SAAS\\LOGS\\Restoring')
-MSSQL = MSSQL.MSSQLClass(server_name='ETS', username='ETS', pwd='A3yhUv1Jk9fR', database_name='master', logger=LOGGER)
+MSSQL = MSSQL.MSSQLClass(server_name=cr.SQL_SERVER_NAME, 
+                         username=cr.SQL_USER_NAME,
+                         pwd=cr.SQL_PWD,
+                         database_name='master',
+                         logger=LOGGER)
 BACKUP_PATH = 'C:\\Dropbox (1C-Poland)\\BACKUPS'
 count = 0
 print('Started restoring databases...')
