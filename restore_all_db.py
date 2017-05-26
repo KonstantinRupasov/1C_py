@@ -20,9 +20,7 @@ def dbnames_gen(backup_path):
             yield _dbname
 
 LOGGER = L.LoggerClass(mode='2file', path='C:\\SAAS\\LOGS\\Restoring')
-MSSQL = MSSQL.MSSQLClass(server_name=cr.SQL_SERVER_NAME, 
-                         username=cr.SQL_USER_NAME,
-                         pwd=cr.SQL_PWD,
+MSSQL = MSSQL.MSSQLClass(cr.DBMS,
                          database_name='master',
                          logger=LOGGER)
 BACKUP_PATH = 'C:\\Dropbox (1C-Poland)\\BACKUPS'
