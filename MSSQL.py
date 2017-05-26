@@ -5,6 +5,7 @@ import os
 import shutil
 import pyodbc as odbc
 import logger as L
+import credentials as cr
 
 class MSSQLClass:
     """
@@ -13,24 +14,24 @@ class MSSQLClass:
     """
     def __init__(
             self,
-            server_name,
-            username,
-            pwd,
+            credentials,
             logger,
             database_name='master'):
         """
         Class initialization
         """
-        self.server_name = server_name
+        self.server_name = credentials['SERVER_NAME']
+        self.username = credentials['USER_NAME']
+        self.pwd = credentials['PWD']
         self.database_name = database_name
         self.backup_path = None
         self._logger = logger
         #Connect to MS SQL
         connection_str = 'DRIVER={{SQL Server}};SERVER={server_name};DATABASE={database_name};\
         UID={username};PWD={pwd}'.format(
-            server_name=server_name,
-            username=username,
-            pwd=pwd,
+            server_name=self.server_name,
+            username=self.username,
+            pwd=self.pwd,
             database_name=database_name)
         connection = odbc.connect(connection_str)
         connection.autocommit = True
@@ -55,10 +56,20 @@ class MSSQLClass:
         #Copying template files into the ne db files
         self._logger.log(['Copying {template_dbname} database files into \
 {dbname} database files'.format(template_dbname=template_dbname, dbname=dbname)])
-        shutil.copy('{data_path}{template_dbname}.mdf'.format(data_path=self._data_path, template_dbname=template_dbname),
-                    '{data_path}{dbname}.mdf'.format(data_path=self._data_path, dbname=dbname))
-        shutil.copy('{data_path}{template_dbname}_Log.ldf'.format(data_path=self._data_path, template_dbname=template_dbname),
-                    '{data_path}{dbname}_Log.ldf'.format(data_path=self._data_path, dbname=dbname))
+        shutil.copy(
+            '{data_path}{template_dbname}.mdf'.format(
+                data_path=self._data_path,
+                template_dbname=template_dbname),
+            '{data_path}{dbname}.mdf'.format(
+                data_path=self._data_path,
+                dbname=dbname))
+        shutil.copy(
+            '{data_path}{template_dbname}_Log.ldf'.format(
+                data_path=self._data_path,
+                template_dbname=template_dbname),
+            '{data_path}{dbname}_Log.ldf'.format(
+                data_path=self._data_path,
+                dbname=dbname))
         sql_str = "CREATE DATABASE ""{}"" ON ".format(dbname)
         self._logger.log(['Files are copied successfully'])
         sql_str = "CREATE DATABASE \"{dbname}\" ON (FILENAME = '{data_path}{dbname}.mdf'), \
@@ -73,9 +84,10 @@ class MSSQLClass:
         if not os.path.isdir(backup_path):
             os.mkdir(backup_path)
         backup_filename = os.path.join(backup_path, dbname, '_{dbname}.bak').format(dbname=dbname)
-        sql_str = "BACKUP DATABASE [{dbname}] TO  DISK = N'{backup_filename}' \
- WITH  RETAINDAYS = 1, NOFORMAT, NOINIT, NAME = N'_{dbname}.bak', \
- SKIP, REWIND, NOUNLOAD, STATS = 10".format(dbname=dbname, backup_filename=backup_filename)
+        sql_str = "BACKUP DATABASE [{dbname}] TO  DISK = N'{backup_filename}'" + \
+            " WITH  RETAINDAYS = 1, NOFORMAT, NOINIT, NAME = N'_{dbname}.bak'," + \
+            " SKIP, REWIND, NOUNLOAD, STATS = 10"
+        sql_str = sql_str.format(dbname=dbname, backup_filename=backup_filename)
         #Create the backup
         self._exec_sql(sql_str, 'Creating a full backup {backup_filename} \
 of database {dbname}...'.format(dbname=dbname, backup_filename=backup_filename))
@@ -132,8 +144,9 @@ of database {dbname}...'.format(dbname=dbname, backup_filename=backup_filename))
         #Restore all selected files
         for file in files2restore:
             #Resore the file
-            sql_str = "RESTORE DATABASE [{dbname}] FROM DISK = N'{file}'  WITH FILE = 1,\
- NOUNLOAD, REPLACE, NORECOVERY, STATS = 5".format(dbname=dbname, file=file, data_path=self._data_path)
+            sql_str = "RESTORE DATABASE [{dbname}] FROM DISK = N'{file}'" + \
+            " WITH FILE = 1, NOUNLOAD, REPLACE, NORECOVERY, STATS = 5"
+            sql_str = sql_str.format(dbname=dbname, file=file, data_path=self._data_path)
             self._exec_sql(sql_str, 'Restoring {dbname} from {file}...'.format(dbname=dbname, file=file))
             #Add the file to files2delete
             files2delete.append(file)
@@ -178,7 +191,7 @@ Testing
 #LOGGER = L.LoggerClass(mode='2print')
 if __name__ == "__main__":
     LOGGER = L.LoggerClass(mode='2file', path='C:\\SAAS\\LOGS')
-    MSSQL = MSSQLClass(server_name='ETS', username='ETS', pwd='A3yhUv1Jk9fR', database_name='master', logger=LOGGER)
+    MSSQL = MSSQLClass(cr.DBMS, database_name='master', logger=LOGGER)
     _dbnames = MSSQL.get_restoring_dbs()
     for dbname in _dbnames:
         print(str(dbname))

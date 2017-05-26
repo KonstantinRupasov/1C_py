@@ -8,16 +8,27 @@ The sript assumes that all "Restoring..." databases are needed to be recovered a
 The sript assumes that no online databases are needed to be recovered and published
 """
 import MSSQL
+import OneC
 import logger as L
+import credentials as cr
 
 LOGGER = L.LoggerClass(mode='2file', path='C:\\SAAS\\LOGS\\GoOnline')
-MSSQL = MSSQL.MSSQLClass(server_name='ETS', username='ETS', pwd='A3yhUv1Jk9fR', database_name='master', logger=LOGGER)
+MSSQL = MSSQL.MSSQLClass(cr.DBMS,
+                         database_name='master',
+                         logger=LOGGER)
+ONEC = OneC.OneCClass(logger=LOGGER, version='8.3.10.2252')
 count = 0
 print('Started getting databases online...')
 dbnames = MSSQL.get_restoring_dbs()
 for dbname in dbnames:
     count += 1
-    print('{}. Getting database {} online...'.format(count, dbname))
+    print('{}.1. Getting database {} recovered...'.format(count, dbname))
     MSSQL.get_db_online(dbname)
-    print('{}. Database {} is online'.format(count, dbname))
+    print('{}.1. Database {} is recovered'.format(count, dbname))
+    print('{}.2. Creating 1C Infobase {}...'.format(count, dbname))
+    ONEC.create_infobase(dbname, cr.DBMS, locale='pl')
+    print('{}.2. 1C infobase {} is created'.format(count, dbname))
+    print('{}.3. Publishing 1C infobase {} to web...'.format(count, dbname))
+    ONEC.publish_infobase(ibname=dbname, template_vrd='C:\\SAAS\\default.vrd')
+    print('{}.3. 1C Infobase {} is published to web'.format(count, dbname))
 print('All {} databases are online'.format(count))
