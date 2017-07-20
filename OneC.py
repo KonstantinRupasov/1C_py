@@ -1,10 +1,10 @@
 """
 Working with 1C:Enterprise
 """
-import os, tempfile, re
+import os
 import subprocess as sub
+from psutil import process_iter as ps
 import logger as L
-import credentials as cr
 
 class OneCClass():
     """
@@ -29,28 +29,22 @@ class OneCClass():
         self._logger = logger
         #Check if ras is running. Run it if necessary
         self._logger.log(['Checking if RAS is running...'])
-        res = sub.call('tasklist | findstr ras.exe', shell=True)     #Check if ras is running
-        if not res == 0:                                                #Ras is not running
-            self._logger.log(['RAS is not running. Starting RAS...'])
-            res = sub.call('ras.exe cluster', shell=True)
-            if not res == 0:
-                self._logger.log(['Error starting RAS...', res])
+        if 'ras.exe' not in [p.name() for p in ps()]:
+            #Ras is not found. Run it now
+            res, output = self._run_command('RAS is not running. Starting RAS', 'ras.exe cluster', service=True)
+            if res != 0:
                 raise ChildProcessError('Error starting RAS', res)
-            else:
-                self._logger.log(['RAS is started successfully'])
         #Get cluster GUID
-        #res = sub.check_output('rac.exe cluster list').decode('utf-8')
-        res = self._run_command('Getting the cluster GUID:', 'rac.exe cluster list')
-        for row in res:
+        res, output = self._run_command('Getting the cluster GUID:', 'rac.exe cluster list')
+        for row in output:
             if row.startswith('cluster'):
                 self._cluster_guid = row[32:]        
         self._logger.log(['Cluster GUID is {}'.format(self._cluster_guid)])
         #Get the list of infobases
-        #res = sub.check_output('rac infobase summary list --cluster={}'.format(self._cluster_guid)).decode('utf-8').split('\r\n')
-        res = self._run_command('Getting the list of infobases', 'rac infobase summary list --cluster={}'.format(self._cluster_guid))
+        res, output = self._run_command('Getting the list of infobases', 'rac infobase summary list --cluster={}'.format(self._cluster_guid))
         self._logger.log(['Infobases in cluster {}:'.format(self._cluster_guid)])
         self.infobases = {}
-        for row in res:
+        for row in output:
             if row.startswith('infobase'):
                 infobase = row[11:]
             elif row.startswith('name'):
@@ -83,16 +77,8 @@ class OneCClass():
             db_name=ibname)
         if locale != '':
             command = command + ' --locale={}'.format(locale)
-        res = self._run_command('Creating {} infobase:'.format(ibname), command)
-        #self._logger.log(['Creating {} infobase with command:'.format(ibname), command])
-        #try:
-        #    res = sub.check_output(command)
-        #    #Get infobase GUID
-        #except Exception as exc:
-        #    self._logger.log(['Error creating 1C IB', str(exc)])
-        #    raise ChildProcessError('Error creating 1C IB', str(exc))
-        infobase_guid = res[11:].decode('utf-8')            #res format is "infobase : XXXXXXXX"
-        #self._logger.log([res, 'New 1C infobase {} is created'.format(ibname), 'IB GUID={}'.format(infobase_guid)])
+        res, output = self._run_command('Creating {} infobase:'.format(ibname), command)
+        infobase_guid = output[11:].decode('utf-8')            #res format is "infobase : XXXXXXXX"
         return infobase_guid
 
     def publish_infobase(
@@ -123,14 +109,6 @@ class OneCClass():
             command = command + ' -descriptor {template_vrd}'
             command = command.format(template_vrd=template_vrd)
         self._run_command('Publishing {} infobase:'.format(ibname), command)
-        #self._logger.log(['Publishing {} infobase with command:'.format(ibname), command])
-        #try:
-        #    res = sub.check_output(command, shell=True)
-            #Get infobase GUID
-        #except Exception as exc:
-        #    self._logger.log(['Error publishing infobase {}'.format(ibname), str(exc)])
-        #    raise ChildProcessError('Error publishing infobase {}'.format(ibname), str(exc))
-        #self._logger.log([res, 'Infobase {} is published to web sucessfully'.format(ibname)])
             
     def disconnect_ib_users(self, ibname):
         """
@@ -147,15 +125,9 @@ class OneCClass():
             cluster_guid=self._cluster_guid,
             ib_guid=ib_guid
         )
-        res = self._run_command('Getting the list of {} infobase connections:'.format(ibname), command)
-        #self._logger.log(['Getting the list of {} infobase connections:'.format(ibname), command])
-        #try:
-        #    res = sub.check_output(command).decode('utf-8').split('\r\n')
-        #except Exception as exc:
-        #    self._logger.log(['Error getting the list if IB connections', str(exc)])
-        #    raise ChildProcessError('Error getting the list if IB connections', str(exc))
+        res, output = self._run_command('Getting the list of {} infobase connections:'.format(ibname), command)
         #Cycle through the list of connections and close them
-        for row in res:
+        for row in output:
             if row.startswith('connection'):
                 connection_guid = row[17:]
             elif row.startswith('process'):
@@ -170,21 +142,12 @@ class OneCClass():
                     connection_guid=connection_guid
                 )
                 self._run_command('Closing a connection:', command)
-                #self._logger.log(['Closing a connection:', command])
-                #Close the connection
-                #try:
-                #    res = sub.check_output(command).decode('utf-8').split('\r\n')
-                #except Exception as exc:
-                #    self._logger.log(['Error closing connection', str(exc)])
-                #    raise ChildProcessError('Error closing connection', str(exc))
-                #self._logger.log(['Connection is closed'])
 
     def set_new_sessions_lock(self, ibname, mode='on'):
         """
         Set ibnfobase new session lock mode to on or off
         """
-        if mode not in ('on', 'off'):
-            raise ValueError('Invalid mode parameter value. Valid values: "on", "off"')
+        self._check_value('mode parameter', mode, ('on', 'off'))
         ib_guid = self._get_ib_guid(ibname)
         command = 'rac infobase update' + \
             ' --cluster={cluster_guid}' + \
@@ -195,6 +158,7 @@ class OneCClass():
             infobase_guid=ib_guid,
             mode=mode            
         )
+
     def restore_ib(self, ibname, file_name):
         """
         Restore the infobase from DT file
@@ -203,31 +167,17 @@ class OneCClass():
         self.set_new_sessions_lock(ibname, mode='on')
         #Disconnect all the users from the infobase
         self.disconnect_ib_users(ibname)
-        #Create a temp file to store 1cv8 system log
-        log_file, log_filename = tempfile.mkstemp()
-        os.close(log_file)
         #Restore the infobase
         command = '{path}\\1cv8.exe DESIGNER' + \
-            ' /S localhost\{ibname} /RestoreIB "{file_name}"' + \
-            ' /Out "{log_filename}"'
+            ' /S localhost\{ibname} /RestoreIB "{file_name}"'
         command = command.format(
             path=self.path,
             ibname=ibname,
-            file_name=file_name,
-            log_filename=log_filename
+            file_name=file_name
         )
-        try:
-            res = sub.check_output(command).decode('utf-8').split('\r\n')
-        except Exception as exc:
-            self._logger.log(['Error restoring infobase', str(exc)])
-            #Read the log_file
-            log_file = open(log_filename)
-            self._logger.log([row for row in log_file])
-            #Unlock new sessions
-            self.set_new_sessions_lock(ibname, mode='on')
-            raise ChildProcessError('Error restoring infobase', str(exc))
-        #Check log_file. Should be empty if everything's OK
-        self._logger.log(['Infobase is restored successfully'])
+        self._run_command(
+            'Restoring {} infobase from DT file'.format(ibname),
+            command)
 
     def _get_ib_guid(self, ibname):
         """
@@ -242,21 +192,39 @@ class OneCClass():
             raise KeyError('Cannot find infobase {}'.format(ibname))
         return ib_guid
     
-    def _run_command(self, descr, command):
+    def _run_command(self, descr, command, service=False):
         """
-        Run the command using sub.check_output
-        Catch exceptions
+        Run the command using sub.check_call
+        Returns the OS result of the command execution
+        Puts the output to self.tmp_file, reads it and returns back to caller
+        if service == True:
+            Do not wait until the command is executed
         """
         self._logger.log([descr, command])
+        output = ''
         try:
-            res = sub.check_output(command).decode('utf-8').split('\r\n')
-        except Exception as exc:
+            proc = sub.Popen(command, stdout=sub.PIPE)
+            if not service:
+                proc.wait()
+                output = proc.stdout.read().decode('utf-8')
+            self._logger.log(['Success'])
+            res = 0
+        except OSError as exc:
             self._logger.log(['Error:', str(exc)])
-            #Read the log_file
-            raise ChildProcessError('Error: ', str(exc))
-        #Check log_file. Should be empty if everything's OK
-        self._logger.log(['Success'])
-        return(res)
+            res = exc.errno
+            output = exc.strerror
+        self._logger.log(['Command return code:', res])
+        self._logger.log(['Command output:', output])
+        return res, output.split('\r\n')
+
+    def _check_value(self, name, value, valid_values):
+        """
+        Checks if the value is in the valid_values list
+        Raises exception if it's not
+        """
+        if value not in valid_values:
+            self._logger.log(['Invalid {} value. Valid values:'.format(name), valid_values])
+            raise ValueError('Invalid {} value. Valid values: {}'.format(name, valid_values))
         
 if __name__ == "__main__":
     LOGGER = L.LoggerClass(mode='2print')
