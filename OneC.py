@@ -141,7 +141,7 @@ class OneCClass():
                     process_guid=process_guid,
                     connection_guid=connection_guid
                 )
-                self._run_command('Closing a connection:', command)
+                res, output = self._run_command('Closing a connection:', command)
 
     def set_new_sessions_lock(self, ibname, mode='on'):
         """
@@ -158,6 +158,7 @@ class OneCClass():
             infobase_guid=ib_guid,
             mode=mode            
         )
+        res, output = self._run_command('Setting session lock mode to {}'.format(mode), command)
 
     def restore_ib(self, ibname, file_name):
         """
@@ -178,6 +179,8 @@ class OneCClass():
         self._run_command(
             'Restoring {} infobase from DT file'.format(ibname),
             command)
+        #Unlock new sessions
+        self.set_new_sessions_lock(ibname, mode='off')
 
     def _get_ib_guid(self, ibname):
         """
