@@ -48,6 +48,7 @@ class OneCClass():
             elif row.startswith('name'):
                 name = row[11:]
                 self.infobases[name] = infobase
+                self._logger.log(['{}: {}'.format(name, infobase)])
 
     def create_infobase(self, ibname, dbms, locale=''):
         """
@@ -122,9 +123,11 @@ class OneCClass():
             cluster_guid=self._cluster_guid,
             ib_guid=ib_guid
         )
-        command = self._rac_add_user_credentials(command, username, pwd)
+        command = self._add_user_credentials(command, 'rac', username, pwd)
         output = self._run_command('Getting the list of {} infobase connections:'.format(ibname), command)
-        self._logger.log(['List of {} infobase connections'.format(ibname), output])
+        self._logger.log(['List of {} infobase connections:'.format(ibname)])
+        for row in output:
+            self._logger.log([row])
         #Cycle through the list of connections and close them
         for row in output:
             if row.startswith('connection'):
@@ -140,7 +143,7 @@ class OneCClass():
                     process_guid=process_guid,
                     connection_guid=connection_guid
                 )
-                command = self._rac_add_user_credentials(command, username, pwd)
+                command = self._add_user_credentials(command, 'rac', username, pwd)
                 self._run_command('Closing a connection:', command)
 
     def set_new_sessions_lock(self, ibname, mode='on', username='', pwd=''):
@@ -153,12 +156,12 @@ class OneCClass():
             ' --cluster={cluster_guid}' + \
             ' --infobase={infobase_guid}' + \
             ' --sessions-deny={mode}'
-        command = self._rac_add_user_credentials(command, username, pwd)
         command = command.format(
             cluster_guid=self._cluster_guid,
             infobase_guid=ib_guid,
             mode=mode            
         )
+        command = self._add_user_credentials(command, 'rac', username, pwd)
         self._run_command('Setting session lock mode to {}'.format(mode), command)
 
     def restore_ib(self, ibname, file_name, username='', pwd=''):
@@ -171,17 +174,20 @@ class OneCClass():
         self.disconnect_ib_users(ibname, username=username, pwd=pwd)
         #Restore the infobase
         command = '{path}\\1cv8.exe DESIGNER' + \
-            ' /S localhost\{ibname} /RestoreIB "{file_name}"'
+            ' /S localhost\{ibname} /RestoreIB "{file_name}"' + \
+            ' /DisableStartupMessages /DisableStartupDialogs'
         command = command.format(
             path=self.path,
             ibname=ibname,
             file_name=file_name
         )
+        command = self._add_user_credentials(command, '1cv8', username, pwd)
+        #Unlock new sessions
+        self.set_new_sessions_lock(ibname, mode='off', username=username, pwd=pwd)
+        #Restore IB
         self._run_command(
             'Restoring {} infobase from DT file'.format(ibname),
             command)
-        #Unlock new sessions
-        self.set_new_sessions_lock(ibname, mode='off', username=username, pwd=pwd)
 
     def _get_ib_guid(self, ibname):
         """
@@ -231,19 +237,33 @@ class OneCClass():
             self._logger.log(['Invalid {} value. Valid values:'.format(name), valid_values])
             raise ValueError('Invalid {} value. Valid values: {}'.format(name, valid_values))
 
-    def _rac_add_user_credentials(self, command, username='', pwd=''):
+    def _add_user_credentials(self, command, tool='rac', username='', pwd=''):
         """
         Add username and wd to command (if they are specified)
+        Uses parameter names according to the tool syntax. 
+        Valid tools:
+            - rac
+            - 1cv8
         """
         if username != '':
-            command = command + ' --infobase-user={}'.format(username)
+            command = command + ' {param}"{value}"'
+            if tool == 'rac': 
+                param='--infobase-user='
+            elif tool == '1cv8':
+                param='/N '
+            command = command.format(param=param, value=username)
         if pwd != '':
-            command = command + ' --infobase-pwd={}'.format(pwd)
+            command = command + ' {param}"{value}"'
+            if tool == 'rac': 
+                param='--infobase-pwd='
+            elif tool == '1cv8':
+                param='/P '
+            command = command.format(param=param, value=pwd)
         return command
         
 if __name__ == "__main__":
     LOGGER = L.LoggerClass(mode='2print')
-    ONEC = OneCClass(logger=LOGGER, version='8.3.7.2027')
-    ONEC.restore_ib(ibname='demo', file_name='C:\\CreateNewIB\\demo.dt', username='\"John Smith\"')
+    ONEC = OneCClass(logger=LOGGER, version='8.3.10.2252')
+    ONEC.restore_ib(ibname='PMC_ACS', file_name='D:\\Rupasov\\TMP\\1cv8.dt', username='admin', pwd='admin')
     #ONEC.create_infobase('DR_IT', cr.DBMS, locale='pl')
     #ONEC.publish_infobase(ibname='DR_IT', template_vrd='C:\\SAAS\\default.vrd')
