@@ -31,17 +31,15 @@ class OneCClass():
         self._logger.log(['Checking if RAS is running...'])
         if 'ras.exe' not in [p.name() for p in ps()]:
             #Ras is not found. Run it now
-            res, output = self._run_command('RAS is not running. Starting RAS', 'ras.exe cluster', service=True)
-            if res != 0:
-                raise ChildProcessError('Error starting RAS', res)
+            self._run_command('RAS is not running. Starting RAS', 'ras.exe cluster', service=True)
         #Get cluster GUID
-        res, output = self._run_command('Getting the cluster GUID:', 'rac.exe cluster list')
+        output = self._run_command('Getting the cluster GUID:', 'rac.exe cluster list')
         for row in output:
             if row.startswith('cluster'):
-                self._cluster_guid = row[32:]        
+                self._cluster_guid = row[32:]
         self._logger.log(['Cluster GUID is {}'.format(self._cluster_guid)])
         #Get the list of infobases
-        res, output = self._run_command('Getting the list of infobases', 'rac infobase summary list --cluster={}'.format(self._cluster_guid))
+        output = self._run_command('Getting the list of infobases', 'rac infobase summary list --cluster={}'.format(self._cluster_guid))
         self._logger.log(['Infobases in cluster {}:'.format(self._cluster_guid)])
         self.infobases = {}
         for row in output:
@@ -50,7 +48,6 @@ class OneCClass():
             elif row.startswith('name'):
                 name = row[11:]
                 self.infobases[name] = infobase
-                #self._logger.log(['{} : {}'.format(name, infobase)])
 
     def create_infobase(self, ibname, dbms, locale=''):
         """
@@ -77,7 +74,7 @@ class OneCClass():
             db_name=ibname)
         if locale != '':
             command = command + ' --locale={}'.format(locale)
-        res, output = self._run_command('Creating {} infobase:'.format(ibname), command)
+        output = self._run_command('Creating {} infobase:'.format(ibname), command)
         infobase_guid = output[11:].decode('utf-8')            #res format is "infobase : XXXXXXXX"
         return infobase_guid
 
@@ -110,7 +107,7 @@ class OneCClass():
             command = command.format(template_vrd=template_vrd)
         self._run_command('Publishing {} infobase:'.format(ibname), command)
             
-    def disconnect_ib_users(self, ibname):
+    def disconnect_ib_users(self, ibname, username='', pwd=''):
         """
         Disconnect all infobase users
         """
@@ -125,7 +122,9 @@ class OneCClass():
             cluster_guid=self._cluster_guid,
             ib_guid=ib_guid
         )
-        res, output = self._run_command('Getting the list of {} infobase connections:'.format(ibname), command)
+        command = self._rac_add_user_credentials(command, username, pwd)
+        output = self._run_command('Getting the list of {} infobase connections:'.format(ibname), command)
+        self._logger.log(['List of {} infobase connections'.format(ibname), output])
         #Cycle through the list of connections and close them
         for row in output:
             if row.startswith('connection'):
@@ -141,9 +140,10 @@ class OneCClass():
                     process_guid=process_guid,
                     connection_guid=connection_guid
                 )
-                res, output = self._run_command('Closing a connection:', command)
+                command = self._rac_add_user_credentials(command, username, pwd)
+                self._run_command('Closing a connection:', command)
 
-    def set_new_sessions_lock(self, ibname, mode='on'):
+    def set_new_sessions_lock(self, ibname, mode='on', username='', pwd=''):
         """
         Set ibnfobase new session lock mode to on or off
         """
@@ -153,21 +153,22 @@ class OneCClass():
             ' --cluster={cluster_guid}' + \
             ' --infobase={infobase_guid}' + \
             ' --sessions-deny={mode}'
+        command = self._rac_add_user_credentials(command, username, pwd)
         command = command.format(
             cluster_guid=self._cluster_guid,
             infobase_guid=ib_guid,
             mode=mode            
         )
-        res, output = self._run_command('Setting session lock mode to {}'.format(mode), command)
+        self._run_command('Setting session lock mode to {}'.format(mode), command)
 
-    def restore_ib(self, ibname, file_name):
+    def restore_ib(self, ibname, file_name, username='', pwd=''):
         """
         Restore the infobase from DT file
         """
         #Lock new sessions
-        self.set_new_sessions_lock(ibname, mode='on')
+        self.set_new_sessions_lock(ibname, mode='on', username=username, pwd=pwd)
         #Disconnect all the users from the infobase
-        self.disconnect_ib_users(ibname)
+        self.disconnect_ib_users(ibname, username=username, pwd=pwd)
         #Restore the infobase
         command = '{path}\\1cv8.exe DESIGNER' + \
             ' /S localhost\{ibname} /RestoreIB "{file_name}"'
@@ -180,7 +181,7 @@ class OneCClass():
             'Restoring {} infobase from DT file'.format(ibname),
             command)
         #Unlock new sessions
-        self.set_new_sessions_lock(ibname, mode='off')
+        self.set_new_sessions_lock(ibname, mode='off', username=username, pwd=pwd)
 
     def _get_ib_guid(self, ibname):
         """
@@ -206,19 +207,20 @@ class OneCClass():
         self._logger.log([descr, command])
         output = ''
         try:
-            proc = sub.Popen(command, stdout=sub.PIPE)
+            proc = sub.Popen(command, stdout=sub.PIPE, stderr=sub.PIPE)
             if not service:
                 proc.wait()
-                output = proc.stdout.read().decode('utf-8')
+                err = proc.stderr.read().decode('utf-8')
+                if err != '':
+                    #Error during command execution
+                    raise ChildProcessError('Error {} when {}'.format(err, descr))
+                else:
+                    output = proc.stdout.read().decode('utf-8')
             self._logger.log(['Success'])
-            res = 0
-        except OSError as exc:
+            return output.split('\r\n')
+        except Exception as exc:
             self._logger.log(['Error:', str(exc)])
-            res = exc.errno
-            output = exc.strerror
-        self._logger.log(['Command return code:', res])
-        self._logger.log(['Command output:', output])
-        return res, output.split('\r\n')
+            raise exc
 
     def _check_value(self, name, value, valid_values):
         """
@@ -228,10 +230,20 @@ class OneCClass():
         if value not in valid_values:
             self._logger.log(['Invalid {} value. Valid values:'.format(name), valid_values])
             raise ValueError('Invalid {} value. Valid values: {}'.format(name, valid_values))
+
+    def _rac_add_user_credentials(self, command, username='', pwd=''):
+        """
+        Add username and wd to command (if they are specified)
+        """
+        if username != '':
+            command = command + ' --infobase-user={}'.format(username)
+        if pwd != '':
+            command = command + ' --infobase-pwd={}'.format(pwd)
+        return command
         
 if __name__ == "__main__":
     LOGGER = L.LoggerClass(mode='2print')
-    ONEC = OneCClass(logger=LOGGER, version='8.3.10.2252')
-    ONEC.restore_ib('PMC_ACS', 'C:\\Users\\Rupasov\\Downloads\\1cv8.dt')
+    ONEC = OneCClass(logger=LOGGER, version='8.3.7.2027')
+    ONEC.restore_ib(ibname='demo', file_name='C:\\CreateNewIB\\demo.dt', username='\"John Smith\"')
     #ONEC.create_infobase('DR_IT', cr.DBMS, locale='pl')
     #ONEC.publish_infobase(ibname='DR_IT', template_vrd='C:\\SAAS\\default.vrd')
