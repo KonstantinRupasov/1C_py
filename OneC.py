@@ -2,6 +2,7 @@
 Working with 1C:Enterprise
 """
 import os
+import time
 import subprocess as sub
 from psutil import process_iter as ps
 import logger as L
@@ -108,70 +109,91 @@ class OneCClass():
             command = command.format(template_vrd=template_vrd)
         self._run_command('Publishing {} infobase:'.format(ibname), command)
             
-    def disconnect_ib_users(self, ibname, username='', pwd=''):
+    def disconnect_ib_users(self, ibname, pause, timeout, username='', pwd=''):
         """
-        Disconnect all infobase users
+        Closing all infobase connections
+        If some of the connections cannot be closed (which is normal), the proc will:
+            - Wait for pause (sec)
+            - Repeat the attempt
+            - Until the timeout (sec) is over
         """
         ib_guid = self._get_ib_guid(ibname)
         if ib_guid == None:
             return
         #Get the list of infobase connections
-        command = 'rac connection list ' + \
+        command1 = 'rac connection list ' + \
             '--cluster={cluster_guid} ' + \
             '--infobase={ib_guid}'
-        command = command.format(
+        command1 = command1.format(
             cluster_guid=self._cluster_guid,
             ib_guid=ib_guid
         )
-        command = self._add_user_credentials(command, 'rac', username, pwd)
-        output = self._run_command('Getting the list of {} infobase connections:'.format(ibname), command)
-        self._logger.log(['List of {} infobase connections:'.format(ibname)])
-        for row in output:
-            self._logger.log([row])
-        #Cycle through the list of connections and close them
-        for row in output:
-            if row.startswith('connection'):
-                connection_guid = row[17:]
-            elif row.startswith('process'):
-                process_guid = row[17:]
-                command = 'rac connection disconnect' + \
-                        ' --cluster={cluster_guid}' + \
-                        ' --process={process_guid}' + \
-                        ' --connection={connection_guid}'
-                command = command.format(
-                    cluster_guid=self._cluster_guid,
-                    process_guid=process_guid,
-                    connection_guid=connection_guid
-                )
-                command = self._add_user_credentials(command, 'rac', username, pwd)
-                self._run_command('Closing a connection:', command)
+        command1 = self._add_user_credentials(command1, 'rac', username, pwd)
+        #Cycle until all connections are deleted of timeout is over
+        start_time = time.time()
+        _continue = True
+        while _continue:
+            output = self._run_command('Getting the list of {} infobase connections:'.format(ibname), command1)
+            if output == ['']:
+                self._logger.log(['No open connections found'])
+                break
+            self._logger.log(['List of {} infobase connections:'.format(ibname)])
+            for row in output:
+                self._logger.log([row])
+            #Cycle through the list of connections and close them
+            for row in output:
+                if row == '': 
+                    _continue = False
+                    break
+                if row.startswith('connection'):
+                    connection_guid = row[17:]
+                elif row.startswith('process'):
+                    process_guid = row[17:]
+                    command2 = 'rac connection disconnect' + \
+                            ' --cluster={cluster_guid}' + \
+                            ' --process={process_guid}' + \
+                            ' --connection={connection_guid}'
+                    command2 = command2.format(
+                        cluster_guid=self._cluster_guid,
+                        process_guid=process_guid,
+                        connection_guid=connection_guid
+                    )
+                    command2 = self._add_user_credentials(command2, 'rac', username, pwd)
+                    try:
+                        self._run_command('Closing a connection:', command2, timeout=20)
+                        _continue = False
+                    except Exception as exc:
+                        self._logger.log(['Failed closing connection: {}'.format(str(exc))])
+                        self._logger.log(['Next attempt in {} sec'.format(pause)])
+                        if time.time() - start_time > timeout:
+                            raise ChildProcessError('Failed closing connections')
+                        time.sleep(pause)
 
-    def set_new_sessions_lock(self, ibname, mode='on', username='', pwd=''):
+    def ib_set_new_sessions_lock(self, ibname, mode, username, pwd):
         """
-        Set ibnfobase new session lock mode to on or off
+        Block/unblock the new sessions creation for the infobase
         """
-        self._check_value('mode parameter', mode, ('on', 'off'))
-        ib_guid = self._get_ib_guid(ibname)
-        command = 'rac infobase update' + \
-            ' --cluster={cluster_guid}' + \
-            ' --infobase={infobase_guid}' + \
-            ' --sessions-deny={mode}'
-        command = command.format(
-            cluster_guid=self._cluster_guid,
-            infobase_guid=ib_guid,
-            mode=mode            
-        )
-        command = self._add_user_credentials(command, 'rac', username, pwd)
-        self._run_command('Setting session lock mode to {}'.format(mode), command)
+        if not self._check_value('ib_set_new_sessions_lock procedure Mode parameter', mode, ['on', 'off']):
+            return
+        self._ib_option_set(ibname, option='sessions-deny', value=mode, username=username, pwd=pwd)
+
+    def ib_set_sch_jobs_lock(self, ibname, mode, username, pwd):
+        """
+        Block/unblock the new scheduled jobs creation for the infobase
+        """
+        if not self._check_value('ib_set_sch_jobs_lock procedure Mode parameter', mode, ['on', 'off']):
+            return
+        self._ib_option_set(ibname, option='scheduled-jobs-deny', value=mode, username=username, pwd=pwd)
 
     def restore_ib(self, ibname, file_name, username='', pwd=''):
         """
         Restore the infobase from DT file
         """
-        #Lock new sessions
-        self.set_new_sessions_lock(ibname, mode='on', username=username, pwd=pwd)
+        #Lock new sessions and scheduled jobs
+        self.ib_set_new_sessions_lock(ibname, mode='on', username=username, pwd=pwd)
+        self.ib_set_sch_jobs_lock(ibname, mode='on', username=username, pwd=pwd)
         #Disconnect all the users from the infobase
-        self.disconnect_ib_users(ibname, username=username, pwd=pwd)
+        self.disconnect_ib_users(ibname, pause=3, timeout = 60, username=username, pwd=pwd)
         #Restore the infobase
         command = '{path}\\1cv8.exe DESIGNER' + \
             ' /S localhost\{ibname} /RestoreIB "{file_name}"' + \
@@ -182,12 +204,31 @@ class OneCClass():
             file_name=file_name
         )
         command = self._add_user_credentials(command, '1cv8', username, pwd)
-        #Unlock new sessions
-        self.set_new_sessions_lock(ibname, mode='off', username=username, pwd=pwd)
+        #Unlock new sessions and scheduled jobs
+        self.ib_set_new_sessions_lock(ibname, mode='off', username=username, pwd=pwd)
+        self.ib_set_sch_jobs_lock(ibname, mode='off', username=username, pwd=pwd)
         #Restore IB
         self._run_command(
             'Restoring {} infobase from DT file'.format(ibname),
             command)
+
+    def _ib_option_set(self, ibname, option, value, username='', pwd=''):
+        """
+        Set infobase named option to value
+        """
+        ib_guid = self._get_ib_guid(ibname)
+        command = 'rac infobase update' + \
+            ' --cluster={cluster_guid}' + \
+            ' --infobase={infobase_guid}' + \
+            ' --{option}={value}'
+        command = command.format(
+            cluster_guid=self._cluster_guid,
+            infobase_guid=ib_guid,
+            option=option,
+            mode=value            
+        )
+        command = self._add_user_credentials(command, 'rac', username, pwd)
+        self._run_command('Setting {option} to {value}'.format(option=option, value=value), command)
 
     def _get_ib_guid(self, ibname):
         """
@@ -202,7 +243,7 @@ class OneCClass():
             raise KeyError('Cannot find infobase {}'.format(ibname))
         return ib_guid
     
-    def _run_command(self, descr, command, service=False):
+    def _run_command(self, descr, command, service=False, timeout=None):
         """
         Run the command using sub.check_call
         Returns the OS result of the command execution
@@ -215,7 +256,7 @@ class OneCClass():
         try:
             proc = sub.Popen(command, stdout=sub.PIPE, stderr=sub.PIPE)
             if not service:
-                proc.wait()
+                proc.wait(timeout)
                 err = proc.stderr.read().decode('utf-8')
                 if err != '':
                     #Error during command execution
