@@ -16,9 +16,8 @@ LOGGER = L.LoggerClass(mode='2file', path='C:\\SAAS\\LOGS\\GoOnline')
 MSSQL = MSSQL.MSSQLClass(cr.DBMS,
                          database_name='master',
                          logger=LOGGER)
-ONEC = OneC.OneCClass(logger=LOGGER, version='8.3.10.2252')
-count = 0
-print('Started getting databases online...')
+ONEC = OneC.OneCClass(logger=LOGGER, version='8.3.7.2027')
+print('Started restoring...')
 dbnames = MSSQL.get_restoring_dbs()
 for dbname in dbnames:
     count += 1
