@@ -304,7 +304,7 @@ class OneCClass():
         
 if __name__ == "__main__":
     LOGGER = L.LoggerClass(mode='2print')
-    ONEC = OneCClass(logger=LOGGER, version='8.3.10.2252')
+    ONEC = OneCClass(logger=LOGGER, version=settings.OneC['version'])
     ONEC.restore_ib(
         ibname=settings.DemoIB['ibname'],
         file_name=settings.DemoIB['file_name'],
