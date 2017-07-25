@@ -6,6 +6,7 @@ import time
 import subprocess as sub
 from psutil import process_iter as ps
 import logger as L
+import credentials as settings
 
 class OneCClass():
     """
@@ -161,7 +162,6 @@ class OneCClass():
                     command2 = self._add_user_credentials(command2, 'rac', username, pwd)
                     try:
                         self._run_command('Closing a connection:', command2, timeout=20)
-                        _continue = False
                     except Exception as exc:
                         self._logger.log(['Failed closing connection: {}'.format(str(exc))])
                         self._logger.log(['Next attempt in {} sec'.format(pause)])
@@ -305,6 +305,11 @@ class OneCClass():
 if __name__ == "__main__":
     LOGGER = L.LoggerClass(mode='2print')
     ONEC = OneCClass(logger=LOGGER, version='8.3.10.2252')
-    ONEC.restore_ib(ibname='PMC_ACS', file_name='D:\\Rupasov\\TMP\\1cv8.dt', username='admin', pwd='admin')
+    ONEC.restore_ib(
+        ibname=settings.DemoIB['ibname'],
+        file_name=settings.DemoIB['file_name'],
+        username=settings.DemoIB['username'],
+        pwd=settings.DemoIB['pwd']
+    )
     #ONEC.create_infobase('DR_IT', cr.DBMS, locale='pl')
     #ONEC.publish_infobase(ibname='DR_IT', template_vrd='C:\\SAAS\\default.vrd')
